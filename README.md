@@ -12,7 +12,7 @@ Both are plain Python 3 (with Tk for the window). They need nothing but WSJT-X o
 Download `wsjtx-tools_<version>_all.deb` from the [Releases](https://github.com/w4mmp-ron/wsjtx-tools/releases) page, then:
 
 ```
-sudo apt install ./wsjtx-tools_1.0.1_all.deb
+sudo apt install ./wsjtx-tools_<version>_all.deb
 ```
 
 The same file works on any CPU (Pi, PC).
