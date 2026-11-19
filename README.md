@@ -89,6 +89,7 @@ Colours:
 - **CQ / 73 only**: shows CQs and messages ending in 73 or RR73 (good for tail-ending; the call in the list is the station just finishing), plus anything with your call.
 - **New countries only**: just the red and orange lines.
 - **Clear each period** (on by default): the lists empty when the first decode of a new period arrives. Untick it to keep the history.
+- **Sort by dB**: strongest signal on top in both lists; clicking the dB column heading does the same. Off = newest on top.
 - **Clear**, or **Erase** under Band Activity in WSJT-X, empties both lists.
 
 ### WSJT-X settings it needs

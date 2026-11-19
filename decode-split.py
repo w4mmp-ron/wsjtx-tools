@@ -206,6 +206,7 @@ class App:
         self.cq_only = tk.BooleanVar(value=False)
         self.new_only = tk.BooleanVar(value=False)
         self.per_period = tk.BooleanVar(value=True)
+        self.by_db = tk.BooleanVar(value=False)
         self.period_ms = None    # time stamp of the decodes now shown
 
         root.title("Decode split")
@@ -219,6 +220,8 @@ class App:
         self.status = ttk.Label(top, text="waiting for WSJT-X ...")
         self.status.pack(side="left")
         ttk.Button(top, text="Clear", command=self.clear).pack(side="right")
+        ttk.Checkbutton(top, text="Sort by dB", variable=self.by_db,
+                        command=self.refilter).pack(side="right", padx=6)
         ttk.Checkbutton(top, text="Clear each period", variable=self.per_period
                         ).pack(side="right", padx=6)
         ttk.Checkbutton(top, text="New countries only", variable=self.new_only,
@@ -251,6 +254,8 @@ class App:
         tree = ttk.Treeview(frame, columns=cols, show="headings")
         for c, h, w in zip(cols, heads, widths):
             tree.heading(c, text=h)
+            if c == "db":
+                tree.heading(c, command=self.toggle_sort)
             tree.column(c, width=w, stretch=(c in ("msg", "country")),
                         anchor="e" if c == "db" else "w")
         sb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
@@ -283,13 +288,15 @@ class App:
             self.cq_only.set(s.get("cq_only", False))
             self.new_only.set(s.get("new_only", False))
             self.per_period.set(s.get("per_period", True))
+            self.by_db.set(s.get("by_db", False))
         except (OSError, ValueError):
             self.root.geometry("1100x500")
 
     def quit(self):
         try:
             json.dump({"geometry": self.root.geometry(), "cq_only": self.cq_only.get(),
-                       "new_only": self.new_only.get(), "per_period": self.per_period.get()}, open(SETTINGS, "w"))
+                       "new_only": self.new_only.get(), "per_period": self.per_period.get(),
+                       "by_db": self.by_db.get()}, open(SETTINGS, "w"))
         except OSError:
             pass
         self.root.destroy()
@@ -398,7 +405,16 @@ class App:
             tree = self.dx
             name, cont = (d["ent"][0], d["ent"][1]) if d["ent"] else ("?", "")
             vals = (utc, d["snr"], d["call"], name, cont, d["msg"])
-        item = tree.insert("", 0, values=vals, tags=d["tags"])
+        pos = 0
+        if self.by_db.get():
+            # strongest on top; a new decode goes below others with the same dB
+            kids = tree.get_children()
+            pos = len(kids)
+            for i, k in enumerate(kids):
+                if self.rows[k]["snr"] < d["snr"]:
+                    pos = i
+                    break
+        item = tree.insert("", pos, values=vals, tags=d["tags"])
         self.rows[item] = d
         kids = tree.get_children()
         for old in kids[MAX_ROWS:]:
@@ -420,6 +436,10 @@ class App:
         for d in self.store:
             if self.shown(d):
                 self.insert(d)
+
+    def toggle_sort(self):
+        self.by_db.set(not self.by_db.get())
+        self.refilter()
 
     def recolour(self):
         for d in self.store:
