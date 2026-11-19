@@ -117,4 +117,8 @@ This makes `wsjtx-tools_<version>_all.deb` in the same folder. The version is in
 
 HRDLog.net has no published API page. This uses the same call as other logging programs (Wavelog, QLog, CQRLOG): a form POST to `https://robot.hrdlog.net/NewEntry.aspx` with `Callsign`, `Code` (the upload code), `App` and `ADIFData` (one ADIF record). HRDLog answers `<insert>1` (stored), `<insert>0` (already there) or an `<error>`.
 
+## License
+
+MIT, see [LICENSE](LICENSE).
+
 73, W4MMP
