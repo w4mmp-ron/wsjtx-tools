@@ -8,7 +8,9 @@ wsjtx-tools installed.
     systemctl --user enable --now hrdlog-upload
     nano ~/.config/hrdlog-upload.conf       (callsign + upload code)
     systemctl --user restart hrdlog-upload
-  After an upgrade: systemctl --user restart hrdlog-upload
+  After an upgrade (as your user):
+    systemctl --user daemon-reload
+    systemctl --user restart hrdlog-upload
 
 MSG
 exit 0

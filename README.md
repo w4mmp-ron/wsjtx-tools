@@ -12,7 +12,7 @@ Both are plain Python 3 (with Tk for the window). They need nothing but WSJT-X o
 Download `wsjtx-tools_<version>_all.deb` from the [Releases](https://github.com/w4mmp-ron/wsjtx-tools/releases) page, then:
 
 ```
-sudo apt install ./wsjtx-tools_1.0.0_all.deb
+sudo apt install ./wsjtx-tools_1.0.1_all.deb
 ```
 
 The same file works on any CPU (Pi, PC).
@@ -59,7 +59,7 @@ The config file holds:
 
 The seen list, the queue of contacts waiting to go, and the log are in `~/.local/state/hrdlog-upload/`.
 
-**After an upgrade** of the package: `systemctl --user restart hrdlog-upload`.
+**After an upgrade** of the package: `systemctl --user daemon-reload` and `systemctl --user restart hrdlog-upload`.
 
 ---
 

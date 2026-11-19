@@ -15,6 +15,7 @@ for s in hrdlog-upload decode-split; do
 done
 mkdir -p "$W/pkg/usr/share/doc/wsjtx-tools"
 sed 's/\r$//' README.md > "$W/pkg/usr/share/doc/wsjtx-tools/README.md"
+sed 's/\r$//' LICENSE > "$W/pkg/usr/share/doc/wsjtx-tools/copyright"
 chmod 755 "$W/pkg/DEBIAN/postinst"
 find "$W/pkg" -type d -exec chmod 755 {} +
 find "$W/pkg/usr" -type f ! -name '*.py' -exec chmod 644 {} +
