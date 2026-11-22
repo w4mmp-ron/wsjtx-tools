@@ -1,5 +1,5 @@
 Package: wsjtx-tools
-Version: 1.0.2
+Version: 1.1.0
 Section: hamradio
 Priority: optional
 Architecture: all
@@ -13,4 +13,6 @@ Description: WSJT-X helpers: HRDLog.net upload and US / DX decode window
  .
  decode-split: a window (Ham Radio menu) that shows the WSJT-X decodes in two
  lists, US and DX, with worked-before colours, CQ / 73 filter, clear each
- period, and double-click to call a station. Uses WSJT-X UDP 127.0.0.1:2237.
+ period, and double-click to call a station. Follows the WSJT-X UDP Server
+ setting: 127.0.0.1 (default), or a multicast group such as 224.0.0.1 to share
+ WSJT-X with other programs.

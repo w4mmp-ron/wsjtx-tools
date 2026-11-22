@@ -98,7 +98,19 @@ File > Settings > Reporting:
 - **UDP Server** `127.0.0.1`, **UDP Server port number** `2237` (the WSJT-X default).
 - **Accept UDP requests** ticked (needed for the double-click).
 
-Only one program can listen on that port. If the window says "port 2237 busy", another program (for example GridTracker or JTAlert) is using it.
+decode-split reads these from WSJT-X's settings when it starts, so there is nothing to set in decode-split itself. The top line of the window shows what it uses, for example `[unicast 127.0.0.1:2237]`.
+
+With `127.0.0.1` only one program can listen. If the window says "Address already in use", another program (for example GridTracker or a logger) has the port. To run them together, use multicast.
+
+### Sharing WSJT-X with other programs (multicast)
+
+1. In WSJT-X, File > Settings > Reporting, set **UDP Server** to `224.0.0.1` and keep the port `2237`.
+2. Under **Outgoing interfaces**, tick your network interface (on a Raspberry Pi usually `eth0`, or `wlan0` on WiFi). If the list shows `lo`, tick that instead; it keeps the data on this computer. On many systems `lo` is not in the list, and with nothing ticked WSJT-X sends nothing. With `eth0` the data also goes onto your home network (not past your router), so programs on other computers there can listen too. Click OK.
+3. **Close WSJT-X and start it again.** WSJT-X may not save the new address until it closes, and decode-split reads it from WSJT-X's settings file.
+4. Close decode-split and start it again. The top line shows `[multicast 224.0.0.1:2237]` once decodes arrive.
+5. Set the other programs to listen to the same address and port (look for "multicast" in their settings). A program that has no multicast setting can't share; it stops getting data when WSJT-X is on multicast.
+
+Double-click still works: the reply goes straight back to WSJT-X. To go back, set UDP Server to `127.0.0.1` again, then restart WSJT-X and decode-split.
 
 The countries come from WSJT-X's own `cty.dat`, and worked-before from your WSJT-X log (`~/.local/share/WSJT-X/`). The window size and the tick boxes are kept in `~/.config/decode-split.json`.
 

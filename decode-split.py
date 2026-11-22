@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Decode split: WSJT-X decodes in two lists, US calls and DX calls.
 
-Listens to the UDP messages WSJT-X sends (Settings -> Reporting -> UDP Server,
-here 127.0.0.1 port 2237) and looks each call up in WSJT-X's cty.dat.
+Listens to the UDP messages WSJT-X sends (Settings -> Reporting -> UDP Server)
+and looks each call up in WSJT-X's cty.dat. The address and port are read from
+WSJT-X's own settings: 127.0.0.1 = this program alone on the port; a multicast
+group such as 224.0.0.1 = shared with other programs (GridTracker, a logger ...).
 
 Colours:  CQ = green   new country (never worked) = red
           new country on this band = orange   your call in the message = yellow
@@ -12,6 +14,7 @@ Erasing Band Activity in WSJT-X clears both lists here too, and with "Clear each
 period" ticked the lists start fresh with the first decode of each new period.
 """
 
+import ipaddress
 import json
 import os
 import re
@@ -21,7 +24,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-HOST = "127.0.0.1"
+HOST = "127.0.0.1"   # used when WSJT-X's settings don't give an address
 PORT = 2237
 WSJTX_DIR = os.path.expanduser("~/.local/share/WSJT-X")
 CTY = os.path.join(WSJTX_DIR, "cty.dat")
@@ -238,13 +241,7 @@ class App:
                                  ("UTC", "dB", "Call", "Country", "", "Message"),
                                  (60, 40, 90, 140, 32, 220))
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            self.sock.bind((HOST, PORT))
-        except OSError as e:
-            self.status.config(text="port %d busy (%s): another program has it" % (PORT, e))
-        self.sock.setblocking(False)
+        self.open_socket()
         root.protocol("WM_DELETE_WINDOW", self.quit)
         root.after(100, self.poll)
         root.after(1000, self.tick)
@@ -302,6 +299,60 @@ class App:
         self.root.destroy()
 
     # -- UDP
+    def read_udp(self):
+        """WSJT-X's UDP Server address and port, from its settings file."""
+        host, port = HOST, PORT
+        try:
+            for line in open(WSJTX_INI, encoding="utf-8", errors="replace"):
+                key, _, val = line.strip().partition("=")
+                if key == "UDPServer" and val and not val.startswith("@"):
+                    host = val
+                elif key == "UDPServerPort" and val.isdigit():
+                    port = int(val)
+        except OSError:
+            pass
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:            # a name such as "localhost"
+            try:
+                ip = ipaddress.ip_address(socket.gethostbyname(host))
+            except (OSError, ValueError):
+                ip = ipaddress.ip_address(HOST)
+        if ip.version != 4:
+            ip = ipaddress.ip_address(HOST)   # IPv6 not handled: use the default
+        return str(ip), port, ip.is_multicast
+
+    def open_socket(self):
+        host, port, multicast = self.read_udp()
+        self.udp_text = "%s %s:%d" % ("multicast" if multicast else "unicast", host, port)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if multicast:
+            # Sharing is the point of multicast. Not for unicast: on Linux it would let a
+            # second program onto the port with no error, and only one of them gets the data.
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.sock.bind((host, port))
+            if multicast:
+                # WSJT-X sends multicast on the loop-back interface unless other
+                # interfaces are picked; join there and on the default interface.
+                joined = False
+                for iface in ("127.0.0.1", "0.0.0.0"):
+                    mreq = struct.pack("4s4s", socket.inet_aton(host), socket.inet_aton(iface))
+                    try:
+                        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+                        joined = True
+                    except OSError:
+                        pass
+                if not joined:
+                    raise OSError("could not join group %s" % host)
+            self.status.config(text="waiting for WSJT-X on %s ..." % self.udp_text)
+        except OSError as e:
+            txt = "%s: %s" % (self.udp_text, e)
+            if not multicast:
+                txt += " - another program has the port? Set WSJT-X UDP Server to 224.0.0.1 to share it"
+            self.status.config(text=txt)
+        self.sock.setblocking(False)
+
     def poll(self):
         for _ in range(200):
             try:
@@ -449,7 +500,7 @@ class App:
     def tick(self):
         if self.last_packet:
             age = time.time() - self.last_packet
-            txt = "%s  %s  %s" % (self.band or "?", self.mode, self.mycall)
+            txt = "%s  %s  %s   [%s]" % (self.band or "?", self.mode, self.mycall, self.udp_text)
             if age > 30:
                 txt += "   (no word from WSJT-X for %d s)" % age
             self.status.config(text=txt)
