@@ -5,6 +5,7 @@ Listens to the UDP messages WSJT-X sends (Settings -> Reporting -> UDP Server)
 and looks each call up in WSJT-X's cty.dat. The address and port are read from
 WSJT-X's own settings: 127.0.0.1 = this program alone on the port; a multicast
 group such as 224.0.0.1 = shared with other programs (GridTracker, a logger ...).
+Runs on Linux and on Windows (there WSJT-X's files are in %LOCALAPPDATA%\\WSJT-X).
 
 Colours:  CQ = green   new country (never worked) = red
           new country on this band = orange   your call in the message = yellow
@@ -26,11 +27,21 @@ from tkinter import ttk
 
 HOST = "127.0.0.1"   # used when WSJT-X's settings don't give an address
 PORT = 2237
-WSJTX_DIR = os.path.expanduser("~/.local/share/WSJT-X")
+WINDOWS = os.name == "nt"
+if WINDOWS:
+    # WSJT-X on Windows keeps its settings, log and cty.dat together in %LOCALAPPDATA%
+    _local = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+    WSJTX_DIR = os.path.join(_local, "WSJT-X")
+    WSJTX_INI = os.path.join(WSJTX_DIR, "WSJT-X.ini")
+    SETTINGS = os.path.join(os.environ.get("APPDATA") or _local, "decode-split.json")
+    FONT, HEAD_FONT = ("Consolas", 10), ("Segoe UI", 10, "bold")
+else:
+    WSJTX_DIR = os.path.expanduser("~/.local/share/WSJT-X")
+    WSJTX_INI = os.path.expanduser("~/.config/WSJT-X.ini")
+    SETTINGS = os.path.expanduser("~/.config/decode-split.json")
+    FONT, HEAD_FONT = ("DejaVu Sans Mono", 10), ("DejaVu Sans", 10, "bold")
 CTY = os.path.join(WSJTX_DIR, "cty.dat")
 ADIF = os.path.join(WSJTX_DIR, "wsjtx_log.adi")
-WSJTX_INI = os.path.expanduser("~/.config/WSJT-X.ini")
-SETTINGS = os.path.expanduser("~/.config/decode-split.json")
 MAGIC = 0xADBCCBDA
 MAX_ROWS = 300
 US_ENTITY = "United States"
@@ -215,8 +226,8 @@ class App:
         root.title("Decode split")
         self.load_settings()
         style = ttk.Style()
-        style.configure("Treeview", font=("DejaVu Sans Mono", 10), rowheight=20)
-        style.configure("Treeview.Heading", font=("DejaVu Sans", 10, "bold"))
+        style.configure("Treeview", font=FONT, rowheight=20)
+        style.configure("Treeview.Heading", font=HEAD_FONT)
 
         top = ttk.Frame(root, padding=4)
         top.pack(fill="x")
@@ -330,8 +341,12 @@ class App:
             # Sharing is the point of multicast. Not for unicast: on Linux it would let a
             # second program onto the port with no error, and only one of them gets the data.
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        elif WINDOWS:
+            # Windows' own "this port is mine": a second program can't take it over.
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         try:
-            self.sock.bind((host, port))
+            # Windows can't bind to a group address: take the port, then join the group.
+            self.sock.bind(("" if (multicast and WINDOWS) else host, port))
             if multicast:
                 # WSJT-X sends multicast on the loop-back interface unless other
                 # interfaces are picked; join there and on the default interface.

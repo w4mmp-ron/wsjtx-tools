@@ -1,6 +1,6 @@
 # wsjtx-tools
 
-Two small helpers for WSJT-X on Linux (Raspberry Pi OS, Debian, Ubuntu):
+Two small helpers for WSJT-X on Linux (Raspberry Pi OS, Debian, Ubuntu). decode-split also runs on Windows:
 
 - **hrdlog-upload**: sends each new contact in your WSJT-X log to HRDLog.net, a few seconds after WSJT-X logs it.
 - **decode-split**: a window that shows the WSJT-X decodes in two lists, US calls and DX calls, with worked-before colours.
@@ -18,6 +18,14 @@ sudo apt install ./wsjtx-tools_<version>_all.deb
 The same file works on any CPU (Pi, PC).
 
 To remove it: `sudo apt remove wsjtx-tools`. Your settings in your home folder are kept.
+
+### Windows (decode-split only)
+
+Download `decode-split.exe` from the same [Releases](https://github.com/w4mmp-ron/wsjtx-tools/releases) page, put it anywhere (the Desktop is fine) and double-click it. There is nothing to install and Python is not needed.
+
+The first time, Windows may say it "protected your PC", because the file is not signed: click **More info**, then **Run anyway**.
+
+To remove it, delete `decode-split.exe` and `%APPDATA%\decode-split.json`.
 
 ---
 
@@ -105,7 +113,7 @@ With `127.0.0.1` only one program can listen. If the window says "Address alread
 ### Sharing WSJT-X with other programs (multicast)
 
 1. In WSJT-X, File > Settings > Reporting, set **UDP Server** to `224.0.0.1` and keep the port `2237`.
-2. Under **Outgoing interfaces**, tick your network interface (on a Raspberry Pi usually `eth0`, or `wlan0` on WiFi). If the list shows `lo`, tick that instead; it keeps the data on this computer. On many systems `lo` is not in the list, and with nothing ticked WSJT-X sends nothing. With `eth0` the data also goes onto your home network (not past your router), so programs on other computers there can listen too. Click OK.
+2. Under **Outgoing interfaces**, on Windows tick the **loopback** interface (it keeps the data on this PC). On Linux, tick your network interface (on a Raspberry Pi usually `eth0`, or `wlan0` on WiFi). If the list shows `lo`, tick that instead; it keeps the data on this computer. On many systems `lo` is not in the list, and with nothing ticked WSJT-X sends nothing. With `eth0` the data also goes onto your home network (not past your router), so programs on other computers there can listen too. Click OK.
 3. **Close WSJT-X and start it again.** WSJT-X may not save the new address until it closes, and decode-split reads it from WSJT-X's settings file.
 4. Close decode-split and start it again. The top line shows `[multicast 224.0.0.1:2237]` once decodes arrive.
 5. Set the other programs to listen to the same address and port (look for "multicast" in their settings). A program that has no multicast setting can't share; it stops getting data when WSJT-X is on multicast.
@@ -113,6 +121,8 @@ With `127.0.0.1` only one program can listen. If the window says "Address alread
 Double-click still works: the reply goes straight back to WSJT-X. To go back, set UDP Server to `127.0.0.1` again, then restart WSJT-X and decode-split.
 
 The countries come from WSJT-X's own `cty.dat`, and worked-before from your WSJT-X log (`~/.local/share/WSJT-X/`). The window size and the tick boxes are kept in `~/.config/decode-split.json`.
+
+On Windows the same files are in `%LOCALAPPDATA%\WSJT-X\` (WSJT-X's settings, `cty.dat` and log), and decode-split keeps its own settings in `%APPDATA%\decode-split.json`.
 
 ---
 
@@ -125,6 +135,15 @@ bash build-deb.sh
 ```
 
 This makes `wsjtx-tools_<version>_all.deb` in the same folder. The version is in `packaging/DEBIAN/control`.
+
+## Build the Windows .exe yourself
+
+```
+python -m pip install pyinstaller
+build-exe.cmd
+```
+
+Run these in the `wsjtx-tools` folder, with Python 3 from python.org (it includes Tk). This makes `dist\decode-split.exe`.
 
 ## How the HRDLog upload works
 
