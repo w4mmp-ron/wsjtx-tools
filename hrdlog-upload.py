@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -424,6 +425,98 @@ class Uploader:
             save_queue(keep)
 
 
+ERROR_WORDS = ("refused", "network problem", "gave up", "missing")
+
+
+def service_state():
+    """'running since ...' / 'not running' for the Linux user service, '' on Windows."""
+    if WINDOWS:
+        return ""
+    try:
+        out = subprocess.run(["systemctl", "--user", "show", "hrdlog-upload",
+                              "-p", "ActiveState", "-p", "ActiveEnterTimestamp"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return "unknown (systemctl not found)"
+    v = dict(l.split("=", 1) for l in out.splitlines() if "=" in l)
+    if v.get("ActiveState") == "active":
+        return "running since %s" % (v.get("ActiveEnterTimestamp") or "?")
+    return "NOT running (%s): systemctl --user start hrdlog-upload" % (v.get("ActiveState") or "?")
+
+
+def log_tail(nbytes=200000):
+    try:
+        with open(LOG, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - nbytes))
+            return f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+
+
+def recent_contacts(lines, n=5):
+    """Last n contacts from the log: (time, key, name, outcome)."""
+    found = {}
+    order = []
+    for line in lines:
+        t, msg = line[:19], line[20:]
+        if msg.startswith("new contact "):
+            rest = msg[12:]
+            key, _, name = rest.partition(" (")
+            found[key] = [t, key, name.rstrip(")"), "waiting"]
+            if key in order:
+                order.remove(key)
+            order.append(key)
+        else:
+            for word, outcome in (("sent ", "sent"), ("already on HRDLog ", "already on HRDLog"),
+                                  ("gave up on ", "gave up"), ("HRDLog refused ", "refused")):
+                if msg.startswith(word):
+                    key = msg[len(word):].split(":")[0].split(" ")[0]
+                    if key in found:
+                        found[key][3] = outcome
+    return [found[k] for k in order[-n:]]
+
+
+def count_rows(path, sql):
+    r = query(path, sql, ())
+    return r[0] if r else None
+
+
+def print_status(callsign, code, files):
+    q = load_queue()
+    lines = log_tail()
+    print("config:", CONF)
+    print("callsign:", callsign or "(not set)", " code:", "set" if code else "(not set)")
+    if not WINDOWS:
+        print("service:", service_state())
+    print("files:", ", ".join(files))
+    print("seen contacts:", len(load_seen()))
+    print("waiting to send:", len(q))
+    for item in q[:20]:
+        print("  ", item["key"], "tries", item.get("tries", 0), item.get("last", ""))
+    us = count_rows(US_CALLBOOK, "SELECT COUNT(*) FROM us_callbook")
+    dx = count_rows(LOOKUP_CACHE, "SELECT COUNT(*) FROM lookup_cache WHERE found=1")
+    print("names: US callbook %s, HamQTH cache %s" % (
+        "{:,} calls".format(us) if us is not None else "not found (run decode-split)",
+        "%d names" % dx if dx is not None else "not found"))
+    last = recent_contacts(lines)
+    print("last contacts:" if last else "last contacts: none in the log yet")
+    for t, key, name, outcome in last:
+        print("   %s  %-32s %-20s %s" % (t, key, name[:20], outcome))
+    # only problems after the last good upload: older ones were fixed since
+    errors = []
+    for l in lines:
+        msg = l[20:]
+        if msg.startswith("sent ") or msg.startswith("already on HRDLog "):
+            errors = []
+        elif any(w in msg for w in ERROR_WORDS):
+            errors.append(l)
+    print("problems since the last upload:", "none" if not errors else "")
+    for l in errors[-3:]:
+        print("  ", l)
+    print("full log:", LOG)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Send new ADIF contacts to HRDLog.net")
     ap.add_argument("--dry-run", action="store_true",
@@ -439,14 +532,7 @@ def main():
     callsign, code, files, poll = read_conf()
 
     if args.status:
-        q = load_queue()
-        print("config:", CONF)
-        print("callsign:", callsign or "(not set)", " code:", "set" if code else "(not set)")
-        print("files:", ", ".join(files))
-        print("seen contacts:", len(load_seen()))
-        print("waiting to send:", len(q))
-        for item in q[:20]:
-            print("  ", item["key"], "tries", item.get("tries", 0), item.get("last", ""))
+        print_status(callsign, code, files)
         return 0
 
     if args.dry_run:

@@ -56,7 +56,7 @@ sudo loginctl enable-linger $USER
 Other commands:
 
 ```
-hrdlog-upload --status      # callsign, how many contacts seen, how many waiting
+hrdlog-upload --status      # service running?, last contacts + answers, names found, problems
 hrdlog-upload --dry-run     # show what would be sent, send nothing
 journalctl _SYSTEMD_USER_UNIT=hrdlog-upload.service
 ```
