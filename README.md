@@ -93,9 +93,12 @@ Colours:
 | yellow | your call is in the message |
 | grey text | this call already worked on this band |
 
+A row under the buttons shows the same colours as a legend.
+
 - **Double-click** a line: the same as a double-click in WSJT-X. It calls that station.
 - **CQ / 73 only**: shows CQs and messages ending in 73 or RR73 (good for tail-ending; the call in the list is the station just finishing), plus anything with your call.
 - **New countries only**: just the red and orange lines.
+- **Hide worked**: hides calls already worked on the current band (the grey ones). A message with your call in it is always shown.
 - **Clear each period** (on by default): the lists empty when the first decode of a new period arrives. Untick it to keep the history.
 - **Sort by dB**: strongest signal on top in both lists; clicking the dB column heading does the same. Off = newest on top.
 - **Clear**, or **Erase** under Band Activity in WSJT-X, empties both lists.
@@ -120,7 +123,7 @@ With `127.0.0.1` only one program can listen. If the window says "Address alread
 
 Double-click still works: the reply goes straight back to WSJT-X. To go back, set UDP Server to `127.0.0.1` again, then restart WSJT-X and decode-split.
 
-The countries come from WSJT-X's own `cty.dat`, and worked-before from your WSJT-X log (`~/.local/share/WSJT-X/`). The window size and the tick boxes are kept in `~/.config/decode-split.json`.
+The countries come from WSJT-X's own `cty.dat`, and worked-before from your WSJT-X log (`~/.local/share/WSJT-X/wsjtx_log.adi`): a call counts as worked on a band when the log has a contact with that call on that band, any mode. Contacts you log while decode-split is running count straight away. The window size and the tick boxes are kept in `~/.config/decode-split.json`.
 
 On Windows the same files are in `%LOCALAPPDATA%\WSJT-X\` (WSJT-X's settings, `cty.dat` and log), and decode-split keeps its own settings in `%APPDATA%\decode-split.json`.
 

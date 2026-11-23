@@ -9,7 +9,7 @@ Runs on Linux and on Windows (there WSJT-X's files are in %LOCALAPPDATA%\\WSJT-X
 
 Colours:  CQ = green   new country (never worked) = red
           new country on this band = orange   your call in the message = yellow
-          call already worked on this band = grey text
+          call already worked on this band = grey text ("Hide worked" hides those)
 Double-click a line = same as a double-click in WSJT-X (it calls that station).
 Erasing Band Activity in WSJT-X clears both lists here too, and with "Clear each
 period" ticked the lists start fresh with the first decode of each new period.
@@ -204,6 +204,13 @@ def parse_message(msg):
 
 # ----------------------------------------------------------------------------- window
 
+BG = {"cq": "#c8f0c8", "newband": "#ffd59a", "new": "#ff9a9a", "me": "#fff27a"}
+WORKED_FG = "#909090"
+LEGEND = [("CQ", BG["cq"], "black"), ("New country", BG["new"], "black"),
+          ("New on band", BG["newband"], "black"), ("My call", BG["me"], "black"),
+          ("Worked on band", "white", WORKED_FG)]
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -219,6 +226,7 @@ class App:
         self.last_packet = 0.0
         self.cq_only = tk.BooleanVar(value=False)
         self.new_only = tk.BooleanVar(value=False)
+        self.hide_worked = tk.BooleanVar(value=False)
         self.per_period = tk.BooleanVar(value=True)
         self.by_db = tk.BooleanVar(value=False)
         self.period_ms = None    # time stamp of the decodes now shown
@@ -238,10 +246,18 @@ class App:
                         command=self.refilter).pack(side="right", padx=6)
         ttk.Checkbutton(top, text="Clear each period", variable=self.per_period
                         ).pack(side="right", padx=6)
+        ttk.Checkbutton(top, text="Hide worked", variable=self.hide_worked,
+                        command=self.refilter).pack(side="right", padx=6)
         ttk.Checkbutton(top, text="New countries only", variable=self.new_only,
                         command=self.refilter).pack(side="right", padx=6)
         ttk.Checkbutton(top, text="CQ / 73 only", variable=self.cq_only,
                         command=self.refilter).pack(side="right", padx=6)
+
+        legend = ttk.Frame(root, padding=(4, 0, 4, 4))
+        legend.pack(fill="x")
+        for text, bg, fg in LEGEND:
+            tk.Label(legend, text=" %s " % text, bg=bg, fg=fg, font=HEAD_FONT,
+                     relief="solid", borderwidth=1).pack(side="left", padx=(0, 6))
 
         pane = ttk.PanedWindow(root, orient="horizontal")
         pane.pack(fill="both", expand=True)
@@ -270,11 +286,9 @@ class App:
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        tree.tag_configure("cq", background="#c8f0c8")
-        tree.tag_configure("newband", background="#ffd59a")
-        tree.tag_configure("new", background="#ff9a9a")
-        tree.tag_configure("me", background="#fff27a")
-        tree.tag_configure("worked", foreground="#909090")
+        for tag, bg in BG.items():
+            tree.tag_configure(tag, background=bg)
+        tree.tag_configure("worked", foreground=WORKED_FG)
         tree.bind("<Double-1>", lambda e, t=tree: self.reply(t))
         pane.add(frame, weight=1)
         return tree
@@ -295,6 +309,7 @@ class App:
             self.root.geometry(s.get("geometry", "1100x500"))
             self.cq_only.set(s.get("cq_only", False))
             self.new_only.set(s.get("new_only", False))
+            self.hide_worked.set(s.get("hide_worked", False))
             self.per_period.set(s.get("per_period", True))
             self.by_db.set(s.get("by_db", False))
         except (OSError, ValueError):
@@ -304,7 +319,7 @@ class App:
         try:
             json.dump({"geometry": self.root.geometry(), "cq_only": self.cq_only.get(),
                        "new_only": self.new_only.get(), "per_period": self.per_period.get(),
-                       "by_db": self.by_db.get()}, open(SETTINGS, "w"))
+                       "by_db": self.by_db.get(), "hide_worked": self.hide_worked.get()}, open(SETTINGS, "w"))
         except OSError:
             pass
         self.root.destroy()
@@ -447,6 +462,8 @@ class App:
         if self.cq_only.get() and not (d["cq"] or d["end73"] or "me" in d["tags"]):
             return False
         if self.new_only.get() and not ({"new", "newband", "me"} & set(d["tags"])):
+            return False
+        if self.hide_worked.get() and "worked" in d["tags"] and "me" not in d["tags"]:
             return False
         return True
 
