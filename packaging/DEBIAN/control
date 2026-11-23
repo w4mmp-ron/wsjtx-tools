@@ -1,18 +1,19 @@
 Package: wsjtx-tools
-Version: 1.4.0
+Version: 1.5.0
 Section: hamradio
 Priority: optional
 Architecture: all
 Maintainer: W4MMP <w4mmp-ron@users.noreply.github.com>
 Depends: python3, python3-tk
 Homepage: https://github.com/w4mmp-ron/wsjtx-tools
-Description: WSJT-X helpers: HRDLog.net upload and US / DX decode window
+Description: WSJT-X helpers: HRDLog.net upload and local / DX decode window
  hrdlog-upload: a user service that watches the WSJT-X log and sends each
  new contact to HRDLog.net (callsign + upload code in
  ~/.config/hrdlog-upload.conf).
  .
  decode-split: a window (Ham Radio menu) that shows the WSJT-X decodes in two
- lists, US and DX, with worked-before colours and legend, CQ / 73 filter, hide worked, clear each
- period, and double-click to call a station. Follows the WSJT-X UDP Server
+ lists, local (your country or continent) and DX, with worked-before colours
+ and legend, CQ / 73 filter, hide worked, clear each period, and double-click
+ to call a station. Follows the WSJT-X UDP Server
  setting: 127.0.0.1 (default), or a multicast group such as 224.0.0.1 to share
  WSJT-X with other programs.

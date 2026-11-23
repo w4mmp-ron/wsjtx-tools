@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Decode split: WSJT-X decodes in two lists, US calls and DX calls.
+"""Decode split: WSJT-X decodes in two lists, local calls and DX calls.
 
 Listens to the UDP messages WSJT-X sends (Settings -> Reporting -> UDP Server)
 and looks each call up in WSJT-X's cty.dat. The address and port are read from
 WSJT-X's own settings: 127.0.0.1 = this program alone on the port; a multicast
 group such as 224.0.0.1 = shared with other programs (GridTracker, a logger ...).
 Runs on Linux and on Windows (there WSJT-X's files are in %LOCALAPPDATA%\\WSJT-X).
+
+Left list = local: your own country (from MyCall in WSJT-X and cty.dat), or with
+"Local: My continent" your whole continent. Right list = everything else (DX).
 
 Colours:  CQ = green   new country (never worked) = red
           new country on this band = orange   your call in the message = yellow
@@ -44,7 +47,10 @@ CTY = os.path.join(WSJTX_DIR, "cty.dat")
 ADIF = os.path.join(WSJTX_DIR, "wsjtx_log.adi")
 MAGIC = 0xADBCCBDA
 MAX_ROWS = 300
-US_ENTITY = "United States"
+FALLBACK_HOME = ("United States", "NA", "K")   # when MyCall is not set or not in cty.dat
+CONTINENTS = {"NA": "North America", "SA": "South America", "EU": "Europe", "AF": "Africa",
+              "AS": "Asia", "OC": "Oceania", "AN": "Antarctica"}
+LOCAL_MODES = {"country": "My country", "continent": "My continent"}
 
 BANDS = [(1.8, 2.0, "160m"), (3.5, 4.0, "80m"), (5.25, 5.45, "60m"), (7.0, 7.3, "40m"),
          (10.1, 10.15, "30m"), (14.0, 14.35, "20m"), (18.068, 18.168, "17m"),
@@ -217,6 +223,9 @@ class App:
         self.cty = Cty(CTY)
         self.worked = Worked(self.cty)
         self.mycall = self.read_mycall()
+        self.home = self.cty.lookup(self.mycall) if self.mycall else None
+        self.home_found = self.home is not None
+        self.home = self.home or FALLBACK_HOME
         self.band = ""
         self.mode = ""
         self.wsjtx_addr = None
@@ -229,6 +238,7 @@ class App:
         self.hide_worked = tk.BooleanVar(value=False)
         self.per_period = tk.BooleanVar(value=True)
         self.by_db = tk.BooleanVar(value=False)
+        self.local_mode = "country"
         self.period_ms = None    # time stamp of the decodes now shown
 
         root.title("Decode split")
@@ -242,16 +252,22 @@ class App:
         self.status = ttk.Label(top, text="waiting for WSJT-X ...")
         self.status.pack(side="left")
         ttk.Button(top, text="Clear", command=self.clear).pack(side="right")
-        ttk.Checkbutton(top, text="Sort by dB", variable=self.by_db,
-                        command=self.refilter).pack(side="right", padx=6)
-        ttk.Checkbutton(top, text="Clear each period", variable=self.per_period
-                        ).pack(side="right", padx=6)
-        ttk.Checkbutton(top, text="Hide worked", variable=self.hide_worked,
-                        command=self.refilter).pack(side="right", padx=6)
-        ttk.Checkbutton(top, text="New countries only", variable=self.new_only,
-                        command=self.refilter).pack(side="right", padx=6)
-        ttk.Checkbutton(top, text="CQ / 73 only", variable=self.cq_only,
-                        command=self.refilter).pack(side="right", padx=6)
+        self.local_box = ttk.Combobox(top, values=list(LOCAL_MODES.values()), state="readonly",
+                                      width=12)
+        self.local_box.set(LOCAL_MODES[self.local_mode])
+        self.local_box.bind("<<ComboboxSelected>>", self.set_local)
+        self.local_box.pack(side="right", padx=(0, 6))
+        ttk.Label(top, text="Local:").pack(side="right", padx=(6, 2))
+
+        opts = ttk.Frame(root, padding=(4, 0, 4, 4))
+        opts.pack(fill="x")
+        for text, var, cmd in (("CQ / 73 only", self.cq_only, self.refilter),
+                               ("New countries only", self.new_only, self.refilter),
+                               ("Hide worked", self.hide_worked, self.refilter),
+                               ("Clear each period", self.per_period, None),
+                               ("Sort by dB", self.by_db, self.refilter)):
+            ttk.Checkbutton(opts, text=text, variable=var, command=cmd
+                            ).pack(side="left", padx=(0, 12))
 
         legend = ttk.Frame(root, padding=(4, 0, 4, 4))
         legend.pack(fill="x")
@@ -261,13 +277,14 @@ class App:
 
         pane = ttk.PanedWindow(root, orient="horizontal")
         pane.pack(fill="both", expand=True)
-        self.us = self.make_tree(pane, "US", ("utc", "db", "call", "grid", "msg"),
-                                 ("UTC", "dB", "Call", "Grid", "Message"),
-                                 (60, 40, 90, 55, 220))
+        self.us = self.make_tree(pane, "", ("utc", "db", "call", "grid", "country", "msg"),
+                                 ("UTC", "dB", "Call", "Grid", "Country", "Message"),
+                                 (60, 40, 90, 55, 120, 220))
         self.dx = self.make_tree(pane, "DX", ("utc", "db", "call", "country", "cont", "msg"),
                                  ("UTC", "dB", "Call", "Country", "", "Message"),
                                  (60, 40, 90, 140, 32, 220))
 
+        self.show_local()
         self.open_socket()
         root.protocol("WM_DELETE_WINDOW", self.quit)
         root.after(100, self.poll)
@@ -312,6 +329,8 @@ class App:
             self.hide_worked.set(s.get("hide_worked", False))
             self.per_period.set(s.get("per_period", True))
             self.by_db.set(s.get("by_db", False))
+            if s.get("local") in LOCAL_MODES:
+                self.local_mode = s["local"]
         except (OSError, ValueError):
             self.root.geometry("1100x500")
 
@@ -319,7 +338,8 @@ class App:
         try:
             json.dump({"geometry": self.root.geometry(), "cq_only": self.cq_only.get(),
                        "new_only": self.new_only.get(), "per_period": self.per_period.get(),
-                       "by_db": self.by_db.get(), "hide_worked": self.hide_worked.get()}, open(SETTINGS, "w"))
+                       "by_db": self.by_db.get(), "hide_worked": self.hide_worked.get(),
+                       "local": self.local_mode}, open(SETTINGS, "w"))
         except OSError:
             pass
         self.root.destroy()
@@ -473,7 +493,7 @@ class App:
             self.clear()
         self.period_ms = d["ms"]
         d = self.classify(d)
-        d["us"] = bool(d["ent"] and d["ent"][0] == US_ENTITY)
+        d["us"] = self.is_local(d)
         self.store.append(d)
         del self.store[:-MAX_ROWS * 2]
         if self.shown(d):
@@ -483,7 +503,8 @@ class App:
         utc = "%02d%02d%02d" % (d["ms"] // 3600000, d["ms"] // 60000 % 60, d["ms"] // 1000 % 60)
         if d["us"]:
             tree = self.us
-            vals = (utc, d["snr"], d["call"], d["grid"], d["msg"])
+            name = d["ent"][0] if d["ent"] else "?"
+            vals = (utc, d["snr"], d["call"], d["grid"], name, d["msg"])
         else:
             tree = self.dx
             name, cont = (d["ent"][0], d["ent"][1]) if d["ent"] else ("?", "")
@@ -519,6 +540,40 @@ class App:
         for d in self.store:
             if self.shown(d):
                 self.insert(d)
+
+    # -- local = my country or my continent
+    def is_local(self, d):
+        if not d["ent"]:
+            return False
+        if self.local_mode == "continent":
+            return d["ent"][1] == self.home[1]
+        return d["ent"][0] == self.home[0]
+
+    def show_local(self):
+        if self.local_mode == "continent":
+            title = CONTINENTS.get(self.home[1], self.home[1])
+            cols = ("utc", "db", "call", "grid", "country", "msg")
+        else:
+            title = self.home[0]
+            cols = ("utc", "db", "call", "grid", "msg")
+        if not self.home_found:
+            title += "  (MyCall not set in WSJT-X)" if not self.mycall else \
+                "  (%s not found in cty.dat)" % self.mycall
+        self.us.master.configure(text=title)
+        self.us.configure(displaycolumns=cols)
+        # give Message whatever room the other columns leave
+        self.root.update_idletasks()
+        fixed = sum(self.us.column(c, "width") for c in cols if c != "msg")
+        self.us.column("msg", width=max(120, self.us.winfo_width() - fixed - 4))
+
+    def set_local(self, event=None):
+        label = self.local_box.get()
+        self.local_mode = [k for k, v in LOCAL_MODES.items() if v == label][0]
+        self.local_box.selection_clear()
+        for d in self.store:
+            d["us"] = self.is_local(d)
+        self.show_local()
+        self.refilter()
 
     def toggle_sort(self):
         self.by_db.set(not self.by_db.get())

@@ -3,7 +3,7 @@
 Two small helpers for WSJT-X on Linux (Raspberry Pi OS, Debian, Ubuntu) and Windows:
 
 - **hrdlog-upload**: sends each new contact in your WSJT-X log to HRDLog.net, a few seconds after WSJT-X logs it.
-- **decode-split**: a window that shows the WSJT-X decodes in two lists, US calls and DX calls, with worked-before colours.
+- **decode-split**: a window that shows the WSJT-X decodes in two lists, local calls (your own country, or your continent) and DX calls, with worked-before colours.
 
 Both are plain Python 3 (with Tk for the window). They need nothing but WSJT-X on the same computer.
 
@@ -89,11 +89,19 @@ If you also run hrdlog-upload on another computer and copy contacts between the 
 decode-split
 ```
 
-Or from the menu: **Ham Radio, then Decode split (US / DX)**. It can be started before or after WSJT-X.
+Or from the menu: **Ham Radio, then Decode split (local / DX)**. It can be started before or after WSJT-X.
 
 The window has two lists side by side:
-- **US** (left): time, dB, call, grid and message.
-- **DX** (right): the same with the country and continent. Alaska and Hawaii count as DX.
+- **Local** (left): time, dB, call, grid and message. The heading shows your country, for example **United States** or **Fed. Rep. of Germany**.
+- **DX** (right): the same with the country and continent.
+
+Your country comes from your callsign (My Call in WSJT-X's settings) and WSJT-X's `cty.dat`, so it works anywhere; a portable call such as VP2E/W4MMP makes Anguilla local. Each DXCC entity is its own country: for a US station, Alaska and Hawaii count as DX.
+
+**Local:** at the top right chooses what counts as local:
+- **My country** (default): the stations in your own country.
+- **My continent**: every station on your continent (useful in a small country). The local list then shows a Country column too, and its heading shows the continent, for example **Europe**.
+
+If My Call is not set in WSJT-X, the United States is used and the heading says so.
 
 Colours:
 

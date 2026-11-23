@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Decode split (US / DX)
-Comment=WSJT-X decodes in two lists, US and DX
+Name=Decode split (local / DX)
+Comment=WSJT-X decodes in two lists, local and DX
 Exec=decode-split
 Icon=utilities-terminal
 Terminal=false
