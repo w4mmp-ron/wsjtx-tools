@@ -12,8 +12,12 @@ On the first start the contacts already in the files are only marked as seen,
 not sent. After that every new record is sent once. Records that could not be
 sent (no network, HRDLog down) stay in a queue and are retried.
 
-Config:  ~/.config/hrdlog-upload.conf
-State:   ~/.local/state/hrdlog-upload/  (seen.txt, offsets.json, queue.jsonl, log)
+Linux:   a user service (systemctl --user ... hrdlog-upload), no window.
+  Config  ~/.config/hrdlog-upload.conf
+  State   ~/.local/state/hrdlog-upload/  (seen.txt, offsets.json, queue.jsonl, log)
+Windows: a small window (hrdlog-upload.exe) with callsign / upload code and the
+  log; it uploads while it is open. "Start with Windows" starts it minimised.
+  Config and state in %APPDATA%\\hrdlog-upload\\, watches %LOCALAPPDATA%\\WSJT-X\\wsjtx_log.adi
 """
 
 import argparse
@@ -22,6 +26,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -29,8 +34,16 @@ import urllib.request
 
 URL = os.environ.get("HRDLOG_URL", "https://robot.hrdlog.net/NewEntry.aspx")  # override only for tests
 APP = "wsjtx-tools"
-CONF = os.path.expanduser("~/.config/hrdlog-upload.conf")
-STATE_DIR = os.path.expanduser("~/.local/state/hrdlog-upload")
+WINDOWS = os.name == "nt"
+if WINDOWS:
+    STATE_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "hrdlog-upload")
+    CONF = os.path.join(STATE_DIR, "hrdlog-upload.conf")
+    DEFAULT_FILES = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                                 "WSJT-X", "wsjtx_log.adi")
+else:
+    CONF = os.path.expanduser("~/.config/hrdlog-upload.conf")
+    STATE_DIR = os.path.expanduser("~/.local/state/hrdlog-upload")
+    DEFAULT_FILES = "~/.local/share/WSJT-X/wsjtx_log.adi"
 SEEN = os.path.join(STATE_DIR, "seen.txt")
 OFFSETS = os.path.join(STATE_DIR, "offsets.json")
 QUEUE = os.path.join(STATE_DIR, "queue.jsonl")
@@ -41,15 +54,17 @@ RETRY_WAIT = 300       # seconds between retries after a network failure
 
 CONF_TEMPLATE = """[hrdlog]
 # Your callsign as registered on HRDLog.net
-callsign =
+callsign = {callsign}
 # Upload code: HRDLog.net -> your profile (Options) -> "Upload code" (also in the e-mail
 # they sent after registration). This is NOT your password.
-code =
+code = {code}
 # ADIF files to watch, comma separated
-files = ~/.local/share/WSJT-X/wsjtx_log.adi
+files = {files}
 # Seconds between checks
-poll = 10
+poll = {poll}
 """
+
+LISTENERS = []         # the Windows window adds itself here to see the log lines
 
 TAG = re.compile(rb"<([A-Za-z0-9_]+)(?::(\d+))?(?::[A-Za-z])?>")
 
@@ -57,6 +72,8 @@ TAG = re.compile(rb"<([A-Za-z0-9_]+)(?::(\d+))?(?::[A-Za-z])?>")
 def log(msg):
     line = time.strftime("%Y-%m-%d %H:%M:%S ") + msg
     print(line, flush=True)
+    for f in LISTENERS:
+        f(line)
     try:
         with open(LOG, "a") as f:
             f.write(line + "\n")
@@ -221,17 +238,114 @@ def scan_file(path, offsets, seen, baseline, persist=True):
 
 
 def read_conf():
-    cp = configparser.ConfigParser()
+    cp = configparser.ConfigParser(interpolation=None)
     if not os.path.exists(CONF):
-        os.makedirs(os.path.dirname(CONF), exist_ok=True)
-        with open(CONF, "w") as f:
-            f.write(CONF_TEMPLATE)
-        os.chmod(CONF, 0o600)
+        write_conf("", "", DEFAULT_FILES, 10)
     cp.read(CONF)
     s = cp["hrdlog"] if cp.has_section("hrdlog") else {}
     files = [os.path.expanduser(p.strip()) for p in s.get("files", "").split(",") if p.strip()]
     return (s.get("callsign", "").strip().upper(), s.get("code", "").strip(), files,
             max(2, int(s.get("poll", "10") or 10)))
+
+
+def write_conf(callsign, code, files, poll):
+    os.makedirs(os.path.dirname(CONF), exist_ok=True)
+    with open(CONF, "w") as f:
+        f.write(CONF_TEMPLATE.format(callsign=callsign, code=code, files=files, poll=poll))
+    try:
+        os.chmod(CONF, 0o600)
+    except OSError:
+        pass
+
+
+class Uploader:
+    """The watch / send loop, used by the Linux service and the Windows window."""
+
+    def __init__(self):
+        self.stop = threading.Event()
+        self.wake = threading.Event()      # set = check now (settings saved, closing)
+        self.reload = False
+        self.load_conf()
+        self.seen = load_seen()
+        self.offsets = load_json(OFFSETS, {})
+        self.queue = load_queue()
+
+    def load_conf(self):
+        self.callsign, self.code, self.files, self.poll = read_conf()
+        self.auth_bad = False
+        self.next_retry = 0
+
+    def run(self, once=False):
+        if not self.callsign or not self.code:
+            log("callsign or upload code missing in %s; watching only (nothing is sent)" % CONF)
+        log("started: %s, files %s, %d waiting"
+            % (self.callsign or "?", ", ".join(self.files), len(self.queue)))
+        while not self.stop.is_set():
+            if self.reload:
+                self.reload = False
+                self.load_conf()
+                log("settings saved: %s, upload code %s"
+                    % (self.callsign or "?", "set" if self.code else "not set"))
+            self.check()
+            if once:
+                return
+            self.wake.wait(self.poll)
+            self.wake.clear()
+
+    def check(self):
+        queue = self.queue
+        # 1. new records -> queue (saved first, then marked seen: none is lost or queued twice)
+        for p in self.files:
+            new = scan_file(p, self.offsets, self.seen, False)
+            for fl, raw in new:
+                k = qso_key(fl)
+                queue.append({"key": k, "raw": raw.decode("latin-1"), "tries": 0})
+                log("new contact %s" % k)
+            if new:
+                save_queue(queue)
+                add_seen(self.seen, [qso_key(fl) for fl, _ in new])
+        save_json(OFFSETS, self.offsets)
+
+        # 2. send the queue
+        if queue and self.callsign and self.code and not self.auth_bad \
+                and time.time() >= self.next_retry:
+            keep = []
+            for i, item in enumerate(queue):
+                if self.stop.is_set():
+                    keep.extend(queue[i:])
+                    break
+                r = send(self.callsign, self.code, item["raw"])
+                if r == "ok":
+                    log("sent %s" % item["key"])
+                elif r == "dup":
+                    log("already on HRDLog %s" % item["key"])
+                elif r.startswith("net:"):
+                    log("network problem (%s); %d waiting, retry in %d s"
+                        % (r[4:], len(queue) - i, RETRY_WAIT))
+                    keep.extend(queue[i:])
+                    self.next_retry = time.time() + RETRY_WAIT
+                    break
+                elif r.startswith("auth:"):
+                    log("HRDLog refused the login: %s. Check the callsign / upload code%s."
+                        % (r[5:], ", then click Save" if WINDOWS
+                           else " in %s, then restart the service" % CONF))
+                    keep.extend(queue[i:])
+                    self.auth_bad = True
+                    break
+                else:
+                    item["tries"] = item.get("tries", 0) + 1
+                    item["last"] = r[8:]
+                    if item["tries"] >= MAX_TRIES:
+                        log("gave up on %s: %s (saved in %s)" % (item["key"], r[8:], FAILED))
+                        with open(FAILED, "a") as f:
+                            f.write(item["raw"] + "\n")
+                    else:
+                        log("HRDLog refused %s: %s (try %d)" % (item["key"], r[8:], item["tries"]))
+                        keep.append(item)
+                        self.next_retry = time.time() + RETRY_WAIT
+                time.sleep(1)       # be gentle with the server
+            self.queue = keep
+            save_queue(keep)
 
 
 def main():
@@ -242,6 +356,7 @@ def main():
     ap.add_argument("--baseline", action="store_true",
                     help="mark everything in the files as seen (send nothing) and exit")
     ap.add_argument("--status", action="store_true", help="show queue / state and exit")
+    ap.add_argument("--minimized", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -276,65 +391,166 @@ def main():
         save_json(OFFSETS, offsets)
         return 0
 
-    if not callsign or not code:
-        log("callsign or upload code missing in %s; watching only (nothing is sent)" % CONF)
+    if WINDOWS and not args.once:
+        return window(args.minimized)
+    Uploader().run(args.once)
+    return 0
 
-    queue = load_queue()
-    next_retry = 0
-    auth_bad = False
-    log("started: %s, files %s, %d waiting" % (callsign or "?", ", ".join(files), len(queue)))
-    while True:
-        # 1. new records -> queue (marked seen at once, so they are queued only once)
-        for p in files:
-            new = scan_file(p, offsets, seen, False)
-            for fl, raw in new:
-                k = qso_key(fl)
-                queue.append({"key": k, "raw": raw.decode("latin-1"), "tries": 0})
-                log("new contact %s" % k)
-            if new:
-                add_seen(seen, [qso_key(fl) for fl, _ in new])
-                save_queue(queue)
-        save_json(OFFSETS, offsets)
 
-        # 2. send the queue
-        if queue and callsign and code and not auth_bad and time.time() >= next_retry:
-            keep = []
-            for i, item in enumerate(queue):
-                r = send(callsign, code, item["raw"])
-                if r == "ok":
-                    log("sent %s" % item["key"])
-                elif r == "dup":
-                    log("already on HRDLog %s" % item["key"])
-                elif r.startswith("net:"):
-                    log("network problem (%s); %d waiting, retry in %d s"
-                        % (r[4:], len(queue) - i, RETRY_WAIT))
-                    keep.extend(queue[i:])
-                    next_retry = time.time() + RETRY_WAIT
-                    break
-                elif r.startswith("auth:"):
-                    log("HRDLog refused the login: %s. Check callsign / upload code in %s, "
-                        "then restart the service." % (r[5:], CONF))
-                    keep.extend(queue[i:])
-                    auth_bad = True
-                    break
-                else:
-                    item["tries"] = item.get("tries", 0) + 1
-                    item["last"] = r[8:]
-                    if item["tries"] >= MAX_TRIES:
-                        log("gave up on %s: %s (saved in %s)" % (item["key"], r[8:], FAILED))
-                        with open(FAILED, "a") as f:
-                            f.write(item["raw"] + "\n")
-                    else:
-                        log("HRDLog refused %s: %s (try %d)" % (item["key"], r[8:], item["tries"]))
-                        keep.append(item)
-                        next_retry = time.time() + RETRY_WAIT
-                time.sleep(1)       # be gentle with the server
-            queue = keep
-            save_queue(queue)
+# ----------------------------------------------------------------------------- Windows window
 
-        if args.once:
-            return 0
-        time.sleep(poll)
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "hrdlog-upload"
+
+
+def start_command():
+    if getattr(sys, "frozen", False):            # the .exe
+        return '"%s" --minimized' % sys.executable
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    return '"%s" "%s" --minimized' % (pyw, os.path.abspath(__file__))
+
+
+def autostart(value=None):
+    """Read (value None) or set the 'Start with Windows' entry."""
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                        winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
+        if value is None:
+            try:
+                return bool(winreg.QueryValueEx(k, RUN_NAME)[0])
+            except OSError:
+                return False
+        if value:
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, start_command())
+        else:
+            try:
+                winreg.DeleteValue(k, RUN_NAME)
+            except OSError:
+                pass
+        return value
+
+
+_MUTEX = None
+
+
+def already_running():
+    import ctypes
+    global _MUTEX
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _MUTEX = k32.CreateMutexW(None, False, "Local\\hrdlog-upload-wsjtx-tools")
+    return ctypes.get_last_error() == 183          # ERROR_ALREADY_EXISTS
+
+
+def window(minimized=False):
+    import queue as q
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+
+    if already_running():
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showinfo("hrdlog-upload", "hrdlog-upload is already running.")
+        return 0
+
+    up = Uploader()
+    lines = q.Queue()
+
+    root = tk.Tk()
+    root.title("hrdlog-upload")
+    root.geometry("720x360")
+
+    top = ttk.Frame(root, padding=6)
+    top.pack(fill="x")
+    ttk.Label(top, text="Callsign").pack(side="left")
+    call_v = tk.StringVar(value=up.callsign)
+    ttk.Entry(top, textvariable=call_v, width=10).pack(side="left", padx=(4, 12))
+    ttk.Label(top, text="Upload code").pack(side="left")
+    code_v = tk.StringVar(value=up.code)
+    ttk.Entry(top, textvariable=code_v, width=24, show="*").pack(side="left", padx=4)
+
+    def save():
+        write_conf(call_v.get().strip().upper(), code_v.get().strip(),
+                   ", ".join(up.files), up.poll)
+        up.reload = True
+        up.wake.set()
+    ttk.Button(top, text="Save", command=save).pack(side="left", padx=8)
+    ttk.Label(root, text="Upload code = the one on your HRDLog.net profile page, not your password.",
+              foreground="#606060", padding=(6, 0)).pack(fill="x")
+
+    status = ttk.Label(root, padding=(6, 0))
+    status.pack(fill="x")
+    ttk.Label(root, text="Watching: " + ", ".join(up.files), padding=(6, 2)).pack(fill="x")
+
+    mid = ttk.Frame(root, padding=(6, 2))
+    mid.pack(fill="both", expand=True)
+    text = tk.Text(mid, font=("Consolas", 10), height=10, wrap="word", state="disabled")
+    sb = ttk.Scrollbar(mid, orient="vertical", command=text.yview)
+    text.configure(yscrollcommand=sb.set)
+    text.pack(side="left", fill="both", expand=True)
+    sb.pack(side="right", fill="y")
+
+    bottom = ttk.Frame(root, padding=6)
+    bottom.pack(fill="x")
+    auto_v = tk.BooleanVar(value=autostart())
+    ttk.Checkbutton(bottom, text="Start with Windows (minimised)", variable=auto_v,
+                    command=lambda: autostart(auto_v.get())).pack(side="left")
+    ttk.Button(bottom, text="Open folder",
+               command=lambda: os.startfile(STATE_DIR)).pack(side="right")
+    ttk.Label(bottom, text="Uploads only while this window is open (it can be minimised).",
+              foreground="#606060").pack(side="right", padx=8)
+
+    # the last lines of the log file, so the window does not start empty
+    try:
+        with open(LOG, encoding="utf-8", errors="replace") as f:
+            for line in f.readlines()[-30:]:
+                lines.put(line.rstrip("\n"))
+    except OSError:
+        pass
+    LISTENERS.append(lines.put)
+
+    def show(line):
+        text.configure(state="normal")
+        text.insert("end", line + "\n")
+        n = int(text.index("end-1c").split(".")[0])
+        if n > 500:
+            text.delete("1.0", "%d.0" % (n - 500))
+        text.configure(state="disabled")
+        text.see("end")
+
+    def refresh():
+        while True:
+            try:
+                show(lines.get_nowait())
+            except q.Empty:
+                break
+        if not up.stop.is_set():
+            status.configure(text="%s    upload code %s    waiting to send: %d    contacts seen: %d"
+                             % (up.callsign or "(no callsign)", "set" if up.code else "NOT SET",
+                                len(up.queue), len(up.seen)))
+        root.after(500, refresh)
+
+    worker = threading.Thread(target=up.run, daemon=True)
+
+    def close():
+        up.stop.set()
+        up.wake.set()
+        status.configure(text="stopping ...")
+
+        def wait():
+            if worker.is_alive():
+                root.after(200, wait)
+            else:
+                log("stopped")
+                root.destroy()
+        wait()
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    worker.start()
+    refresh()
+    if minimized:
+        root.iconify()
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":

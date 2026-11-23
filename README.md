@@ -1,6 +1,6 @@
 # wsjtx-tools
 
-Two small helpers for WSJT-X on Linux (Raspberry Pi OS, Debian, Ubuntu). decode-split also runs on Windows:
+Two small helpers for WSJT-X on Linux (Raspberry Pi OS, Debian, Ubuntu) and Windows:
 
 - **hrdlog-upload**: sends each new contact in your WSJT-X log to HRDLog.net, a few seconds after WSJT-X logs it.
 - **decode-split**: a window that shows the WSJT-X decodes in two lists, US calls and DX calls, with worked-before colours.
@@ -19,13 +19,13 @@ The same file works on any CPU (Pi, PC).
 
 To remove it: `sudo apt remove wsjtx-tools`. Your settings in your home folder are kept.
 
-### Windows (decode-split only)
+### Windows
 
-Download `decode-split.exe` from the same [Releases](https://github.com/w4mmp-ron/wsjtx-tools/releases) page, put it anywhere (the Desktop is fine) and double-click it. There is nothing to install and Python is not needed.
+Download `decode-split.exe` and/or `hrdlog-upload.exe` from the same [Releases](https://github.com/w4mmp-ron/wsjtx-tools/releases) page, put them anywhere (the Desktop is fine) and double-click. There is nothing to install and Python is not needed.
 
-The first time, Windows may say it "protected your PC", because the file is not signed: click **More info**, then **Run anyway**.
+The first time, Windows may say it "protected your PC", because the files are not signed: click **More info**, then **Run anyway**.
 
-To remove it, delete `decode-split.exe` and `%APPDATA%\decode-split.json`.
+To remove them, untick **Start with Windows** in hrdlog-upload first, then delete the .exe files, `%APPDATA%\decode-split.json` and the folder `%APPDATA%\hrdlog-upload`.
 
 ---
 
@@ -68,6 +68,18 @@ The config file holds:
 The seen list, the queue of contacts waiting to go, and the log are in `~/.local/state/hrdlog-upload/`.
 
 **After an upgrade** of the package: `systemctl --user daemon-reload` and `systemctl --user restart hrdlog-upload`.
+
+### hrdlog-upload on Windows
+
+`hrdlog-upload.exe` is a small window instead of a service:
+
+1. Start it, type your callsign and the **upload code** (see above), click **Save**.
+2. The first time, the contacts already in your WSJT-X log (`%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi`) are marked as seen and **not** sent. After that, each new contact appears as `sent <call>` a few seconds after WSJT-X logs it.
+3. Tick **Start with Windows** to have it start minimised each time you log in to Windows.
+
+It uploads only while its window is open; minimise it, don't close it. Contacts logged while it was closed are sent the next time it starts. The same retry and "already on HRDLog" rules apply as on Linux. Only one copy runs at a time. Its settings, seen list and log are in `%APPDATA%\hrdlog-upload\` (**Open folder**).
+
+If you also run hrdlog-upload on another computer and copy contacts between the two logs, the copied ones are reported as "already on HRDLog"; nothing is stored twice.
 
 ---
 
@@ -146,7 +158,7 @@ python -m pip install pyinstaller
 build-exe.cmd
 ```
 
-Run these in the `wsjtx-tools` folder, with Python 3 from python.org (it includes Tk). This makes `dist\decode-split.exe`.
+Run these in the `wsjtx-tools` folder, with Python 3 from python.org (it includes Tk). This makes `dist\decode-split.exe` and `dist\hrdlog-upload.exe`.
 
 ## How the HRDLog upload works
 
