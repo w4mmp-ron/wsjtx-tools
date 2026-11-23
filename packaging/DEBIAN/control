@@ -1,5 +1,5 @@
 Package: wsjtx-tools
-Version: 1.5.0
+Version: 1.6.0
 Section: hamradio
 Priority: optional
 Architecture: all
@@ -9,11 +9,13 @@ Homepage: https://github.com/w4mmp-ron/wsjtx-tools
 Description: WSJT-X helpers: HRDLog.net upload and local / DX decode window
  hrdlog-upload: a user service that watches the WSJT-X log and sends each
  new contact to HRDLog.net (callsign + upload code in
- ~/.config/hrdlog-upload.conf).
+ ~/.config/hrdlog-upload.conf). Adds name, city and state from
+ decode-split's callbook when it has them.
  .
  decode-split: a window (Ham Radio menu) that shows the WSJT-X decodes in two
  lists, local (your country or continent) and DX, with worked-before colours
  and legend, CQ / 73 filter, hide worked, clear each period, and double-click
  to call a station. Follows the WSJT-X UDP Server
  setting: 127.0.0.1 (default), or a multicast group such as 224.0.0.1 to share
- WSJT-X with other programs.
+ WSJT-X with other programs. Shows names: US from the FCC callbook
+ (downloaded and updated weekly), DX from HamQTH.com (free account).

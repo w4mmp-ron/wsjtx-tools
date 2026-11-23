@@ -12,6 +12,10 @@ On the first start the contacts already in the files are only marked as seen,
 not sent. After that every new record is sent once. Records that could not be
 sent (no network, HRDLog down) stay in a queue and are retried.
 
+WSJT-X logs no name. If decode-split is used too, its US callbook (FCC) and its
+HamQTH cache usually know the station: NAME, QTH and STATE are then added to the
+record before it is sent (only fields the record doesn't already have).
+
 Linux:   a user service (systemctl --user ... hrdlog-upload), no window.
   Config  ~/.config/hrdlog-upload.conf
   State   ~/.local/state/hrdlog-upload/  (seen.txt, offsets.json, queue.jsonl, log)
@@ -25,12 +29,14 @@ import configparser
 import json
 import os
 import re
+import sqlite3
 import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
 
 URL = os.environ.get("HRDLOG_URL", "https://robot.hrdlog.net/NewEntry.aspx")  # override only for tests
 APP = "wsjtx-tools"
@@ -40,10 +46,16 @@ if WINDOWS:
     CONF = os.path.join(STATE_DIR, "hrdlog-upload.conf")
     DEFAULT_FILES = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
                                  "WSJT-X", "wsjtx_log.adi")
+    DECODE_SPLIT_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                                    "decode-split")
 else:
     CONF = os.path.expanduser("~/.config/hrdlog-upload.conf")
     STATE_DIR = os.path.expanduser("~/.local/state/hrdlog-upload")
     DEFAULT_FILES = "~/.local/share/WSJT-X/wsjtx_log.adi"
+    DECODE_SPLIT_DIR = os.path.expanduser("~/.local/share/decode-split")
+# decode-split's name files (read only; nothing is added when they are not there)
+US_CALLBOOK = os.path.join(DECODE_SPLIT_DIR, "us_callbook.db")
+LOOKUP_CACHE = os.path.join(DECODE_SPLIT_DIR, "lookup_cache.db")
 SEEN = os.path.join(STATE_DIR, "seen.txt")
 OFFSETS = os.path.join(STATE_DIR, "offsets.json")
 QUEUE = os.path.join(STATE_DIR, "queue.jsonl")
@@ -130,6 +142,69 @@ def qso_key(fields):
     t = fields.get("time_on", "")[:4]
     return "|".join([fields.get("call", "").upper(), fields.get("qso_date", ""), t,
                      fields.get("band", "").lower(), fields.get("mode", "").upper()])
+
+
+def base_call(call):
+    """W1ABC/P, KH6/W1ABC -> W1ABC (the longest part is the station's own call)."""
+    parts = [x for x in call.upper().strip("<>").split("/") if x]
+    return max(parts, key=len) if parts else ""
+
+
+def plain(text):
+    """ASCII only (ADIF counts characters; accents are dropped, not garbled)."""
+    return unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().strip()
+
+
+def query(path, sql, args):
+    if not os.path.exists(path):
+        return None
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % urllib.request.pathname2url(path), uri=True)
+        try:
+            return db.execute(sql, args).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+
+
+def station_info(call):
+    """{'name', 'qth', 'state'} from decode-split's US callbook, else its HamQTH cache."""
+    b = base_call(call)
+    if not b:
+        return {}
+    r = query(US_CALLBOOK, "SELECT name, city, state FROM us_callbook WHERE callsign = ?", (b,))
+    if r:
+        return {"name": r[0], "qth": r[1], "state": r[2]}
+    try:
+        r = query(LOOKUP_CACHE, "SELECT name, qth, state FROM lookup_cache "
+                                "WHERE callsign = ? AND found = 1", (b,))
+    except sqlite3.Error:
+        r = None
+    if r is None:       # a cache from before decode-split kept the city
+        r = query(LOOKUP_CACHE, "SELECT name, '', state FROM lookup_cache "
+                                "WHERE callsign = ? AND found = 1", (b,))
+    if r:
+        return {"name": r[0], "qth": r[1] or "", "state": r[2]}
+    return {}
+
+
+def add_station_info(fields, raw):
+    """raw (str) with NAME / QTH / STATE put in before <eor>, if known and not there yet.
+    Returns (raw, the name added or "")."""
+    info = station_info(fields.get("call", ""))
+    extra = ""
+    for key in ("name", "qth", "state"):
+        v = plain(info.get(key, ""))
+        if v and key not in fields:
+            extra += "<%s:%d>%s " % (key.upper(), len(v), v)
+    if not extra:
+        return raw, ""
+    i = raw.lower().rfind("<eor>")
+    if i < 0:
+        return raw, ""
+    added = plain(info.get("name", "")) if "name" not in fields else ""
+    return raw[:i] + extra + raw[i:], added
 
 
 def load_seen():
@@ -299,8 +374,9 @@ class Uploader:
             new = scan_file(p, self.offsets, self.seen, False)
             for fl, raw in new:
                 k = qso_key(fl)
-                queue.append({"key": k, "raw": raw.decode("latin-1"), "tries": 0})
-                log("new contact %s" % k)
+                text, name = add_station_info(fl, raw.decode("latin-1"))
+                queue.append({"key": k, "raw": text, "tries": 0})
+                log("new contact %s%s" % (k, " (%s)" % name if name else ""))
             if new:
                 save_queue(queue)
                 add_seen(self.seen, [qso_key(fl) for fl, _ in new])
@@ -378,7 +454,7 @@ def main():
         offsets = load_json(OFFSETS, {})
         for p in files:
             for fl, raw in scan_file(p, dict(offsets), set(seen), False, False):
-                print("WOULD SEND", qso_key(fl), raw.decode("latin-1"))
+                print("WOULD SEND", qso_key(fl), add_station_info(fl, raw.decode("latin-1"))[0])
         q = load_queue()
         print("queue:", len(q), "waiting")
         return 0

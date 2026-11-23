@@ -25,7 +25,7 @@ Download `decode-split.exe` and/or `hrdlog-upload.exe` from the same [Releases](
 
 The first time, Windows may say it "protected your PC", because the files are not signed: click **More info**, then **Run anyway**.
 
-To remove them, untick **Start with Windows** in hrdlog-upload first, then delete the .exe files, `%APPDATA%\decode-split.json` and the folder `%APPDATA%\hrdlog-upload`.
+To remove them, untick **Start with Windows** in hrdlog-upload first, then delete the .exe files, `%APPDATA%\decode-split.json` and the folders `%APPDATA%\hrdlog-upload` and `%LOCALAPPDATA%\decode-split` (the callbook).
 
 ---
 
@@ -67,6 +67,8 @@ The config file holds:
 
 The seen list, the queue of contacts waiting to go, and the log are in `~/.local/state/hrdlog-upload/`.
 
+**Names:** WSJT-X logs no name. If decode-split is installed and has looked the call up (see [Names](#names-us-callbook-and-hamqth)), hrdlog-upload adds `NAME`, `QTH` (city) and `STATE` to the record before sending it, and the log line shows the name, for example `new contact K8NWN|... (Michael Koster)`. Fields the record already has are left alone. Without decode-split it sends the record as before.
+
 **After an upgrade** of the package: `systemctl --user daemon-reload` and `systemctl --user restart hrdlog-upload`.
 
 ### hrdlog-upload on Windows
@@ -92,8 +94,10 @@ decode-split
 Or from the menu: **Ham Radio, then Decode split (local / DX)**. It can be started before or after WSJT-X.
 
 The window has two lists side by side:
-- **Local** (left): time, dB, call, grid and message. The heading shows your country, for example **United States** or **Fed. Rep. of Germany**.
-- **DX** (right): the same with the country and continent.
+- **Local** (left): time, dB, call, grid, name, state and message. The heading shows your country, for example **United States** or **Fed. Rep. of Germany**.
+- **DX** (right): time, dB, call, country, continent, name and message.
+
+The two lists are always the same width. A new window opens at 1300 x 500; resize it as you like and the size is kept.
 
 Your country comes from your callsign (My Call in WSJT-X's settings) and WSJT-X's `cty.dat`, so it works anywhere; a portable call such as VP2E/W4MMP makes Anguilla local. Each DXCC entity is its own country: for a US station, Alaska and Hawaii count as DX.
 
@@ -122,6 +126,16 @@ A row under the buttons shows the same colours as a legend.
 - **Clear each period** (on by default): the lists empty when the first decode of a new period arrives. Untick it to keep the history.
 - **Sort by dB**: strongest signal on top in both lists; clicking the dB column heading does the same. Off = newest on top.
 - **Clear**, or **Erase** under Band Activity in WSJT-X, empties both lists.
+
+### Names (US callbook and HamQTH)
+
+**US calls** come from the FCC amateur licence file. The first time decode-split starts it downloads it (about 190 MB, a few minutes) and builds a local callbook (about 75 MB, 820,000 calls) with name, city, state and licence class. The status line next to the buttons shows the progress and then the date of the FCC data.
+- **Update US callbook**: download it again now.
+- **Weekly update** (on by default): once a day decode-split asks the FCC whether a newer file is out (the FCC publishes one each week) and downloads it only if so.
+
+**DX calls** come from [HamQTH.com](https://www.hamqth.com), a free callbook. Make a free account there, then click **HamQTH** in decode-split, type your HamQTH callsign and password, tick **Use HamQTH** and click **Save**. To be kind to HamQTH, decode-split only asks about stations worth knowing: a station calling you (at once), a new country or band, or a CQ, and only once it has been decoded twice within 10 minutes. It asks one call at a time, and remembers the answers for 30 days (7 days for "not found"), so the names fill in over the first few hours. Data provided by HamQTH.com.
+
+The callbook and the HamQTH answers are kept in `~/.local/share/decode-split/` (Windows: `%LOCALAPPDATA%\decode-split\`). The HamQTH password is kept in decode-split's settings file (readable only by you on Linux).
 
 ### WSJT-X settings it needs
 

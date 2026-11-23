@@ -3,7 +3,7 @@ set -e
 cat <<'MSG'
 
 wsjtx-tools installed.
-  Decode split: Ham Radio menu -> "Decode split (US / DX)".
+  Decode split: Ham Radio menu -> "Decode split (local / DX)".
   HRDLog upload, once per user (not as root):
     systemctl --user enable --now hrdlog-upload
     nano ~/.config/hrdlog-upload.conf       (callsign + upload code)
